@@ -1,5 +1,4 @@
 #!/bin/sh
 
-python grade.py ./example/gt.csv ./example/submissions output.csv
-echo "Example done, deleting output.csv"
-rm -f output.csv
+python grade.py ./example/gt.csv ./example/submissions scores.csv transcripts
+echo "Example done, see scores.csv and transcripts directory"

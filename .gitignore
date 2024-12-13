@@ -162,3 +162,7 @@ cython_debug/
 #.idea/
 
 *.swp
+
+# output from running run_example.sh
+/scores.csv
+/transcripts

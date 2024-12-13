@@ -19,12 +19,12 @@ import argparse
 import csv
 import logging
 import os
+import sys
 
 log = logging.getLogger(__name__)
 
 
 class Submission(object):
-
     def __init__(self):
         self.hash2label = dict()
         self.hash2cluster = dict()
@@ -102,7 +102,7 @@ def parse_arguments():
     parser.add_argument(
         "--disable-popularity",
         action="store_true",
-        help="Only consider ground truth CSV when awarding points, ignore other students submissions",
+        help="Only consider ground truth CSV when awarding points, ignore other submissions",
     )
     parser.add_argument("ground_truth_csv", help="Path to CSV file with ground truth")
     parser.add_argument(
@@ -110,6 +110,9 @@ def parse_arguments():
     )
     parser.add_argument(
         "output_csv_filepath", help="Write final scores to provided file path"
+    )
+    parser.add_argument(
+        "transcripts_directory", help="Directory to store grading transcripts"
     )
 
     return parser.parse_args()
@@ -218,37 +221,55 @@ def score_students(subs, gt, vt, use_popularity=True):
     use_popularity -- If True, a student will get points for matching gt *OR* vt, otherwise only
     gt is compared.
 
-    Returns: Dictionary keyed by student ID containing their raw score.
+    Returns: Dictionary keyed by student ID containing their score under the "score" key and
+    their transcript under the "transcript" key. The transcript is a list of tuples (hash,
+    is_correct_label, is_correct_cluster).
     """
-    scores = dict()
     num_samples = gt.num_samples()
     num_malicious = gt.num_malicious()
 
     assert num_samples > 0
+
+    results = dict()
 
     for student in subs:
         sub = subs[student]
 
         labels_correct = 0
         clusters_correct = 0
+        transcript = list()
 
         for hash in gt.get_hashes():
+            result = [hash]
             if gt.lookup_label(hash) == sub.lookup_label(hash):
                 # correct based on ground truth
                 labels_correct += 1
+                result.append(1)
             elif use_popularity and vt.lookup_label(hash) == sub.lookup_label(hash):
                 # correct based on popularity contest
                 labels_correct += 1
+                result.append(1)
+            else:
+                # incorrect label
+                result.append(0)
 
             if not gt.is_malicious(hash):
-                continue
-
-            if gt.lookup_cluster(hash) == sub.lookup_cluster(hash):
+                # cluster doesn't matter for benign samples
+                result.append(-1)
+            elif gt.lookup_cluster(hash) == sub.lookup_cluster(hash):
                 # correct based on ground truth
                 clusters_correct += 1
+                result.append(1)
             elif use_popularity and vt.lookup_cluster(hash) == sub.lookup_cluster(hash):
                 # correct based on popularity contest
                 clusters_correct += 1
+                result.append(1)
+            else:
+                # incorrect cluster
+                result.append(0)
+
+            assert len(result) == 3
+            transcript.append(result)
 
         acc_labels = float(labels_correct) / num_samples
         acc_clusters = float(clusters_correct) / num_malicious
@@ -257,9 +278,12 @@ def score_students(subs, gt, vt, use_popularity=True):
             "Score: ID: %s, Labels: %f, Clusters: %f"
             % (student, acc_labels, acc_clusters)
         )
-        scores[student] = (acc_labels + acc_clusters) / 2
+        results[student] = {
+            "score": (acc_labels + acc_clusters) / 2,
+            "transcript": transcript,
+        }
 
-    return scores
+    return results
 
 
 def parse_submission(fp):
@@ -318,8 +342,26 @@ def write_scores(scores, fp):
         writer = csv.DictWriter(ofile, fieldnames=["student_id", "score"])
         writer.writeheader()
         for id in scores:
-            score = scores[id]
+            score = scores[id]["score"]
             writer.writerow({"student_id": id, "score": score})
+
+
+def write_transcripts(scores, tdir):
+    for id in scores:
+        tfp = os.path.join(tdir, id + ".csv")
+        with open(tfp, "w") as ofile:
+            writer = csv.DictWriter(
+                ofile, fieldnames=["hash", "is_correct_label", "is_correct_cluster"]
+            )
+            writer.writeheader()
+            for hash, label, cluster in scores[id]["transcript"]:
+                writer.writerow(
+                    {
+                        "hash": hash,
+                        "is_correct_label": label,
+                        "is_correct_cluster": cluster,
+                    }
+                )
 
 
 def main():
@@ -332,6 +374,16 @@ def main():
         logging.Formatter("%(levelname)7s | %(asctime)-15s " "| %(message)s")
     )
     log.addHandler(handler)
+
+    # input validation for transcripts directory
+    if not os.path.isdir(args.transcripts_directory):
+        if os.path.exists(args.transcripts_directory):
+            log.error(
+                "Transcripts directory is not a directory: %s"
+                % args.transcripts_directory
+            )
+            sys.exit(1)
+        os.mkdir(args.transcripts_directory)
 
     log.info("Parsing ground truth CSV: %s" % args.ground_truth_csv)
     gt = parse_submission(args.ground_truth_csv)
@@ -350,6 +402,8 @@ def main():
     scores = score_students(subs, gt, vt, not args.disable_popularity)
     log.info("Writing: %s" % args.output_csv_filepath)
     write_scores(scores, args.output_csv_filepath)
+    log.info("Writing: %s" % args.transcripts_directory)
+    write_transcripts(scores, args.transcripts_directory)
 
 
 if __name__ == "__main__":
