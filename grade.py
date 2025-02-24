@@ -298,7 +298,11 @@ def parse_submission(fp):
         with open(fp, "r") as ifile:
             reader = csv.DictReader(ifile)
             for row in reader:
-                sub.add_sample(row["sha256sum"], row["malicious"], row["cluster"])
+                cleaned = [
+                    s.lower().strip()
+                    for s in [row["sha256sum"], row["malicious"], row["cluster"]]
+                ]
+                sub.add_sample(*cleaned)
     except (KeyError, FileNotFoundError) as ex:
         log.error("Cannot parse: %s, %s" % (fp, str(ex)))
 
