@@ -288,6 +288,13 @@ def score_students(subs, gt, vt, use_popularity=True):
     return results
 
 
+def trim_ext(val: str):
+    """Removes .exe and .elf from the end of strings."""
+    if val.endswith(".elf") or val.endswith(".exe"):
+        return val[:-4]
+    return val
+
+
 def parse_submission(fp):
     """Parses a submission CSV and returns a populated Submission object.
 
@@ -301,7 +308,7 @@ def parse_submission(fp):
             reader = csv.DictReader(ifile)
             for row in reader:
                 cleaned = [
-                    s.lower().strip()
+                    trim_ext(s.lower().strip())
                     for s in [row["sha256sum"], row["malicious"], row["cluster"]]
                 ]
                 sub.add_sample(*cleaned)
