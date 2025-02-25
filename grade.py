@@ -279,6 +279,8 @@ def score_students(subs, gt, vt, use_popularity=True):
             % (student, acc_labels, acc_clusters)
         )
         results[student] = {
+            "label_accuracy": acc_labels,
+            "cluster_accuracy": acc_clusters,
             "score": (acc_labels + acc_clusters) / 2,
             "transcript": transcript,
         }
@@ -343,11 +345,23 @@ def parse_submissions(root):
 
 def write_scores(scores, fp):
     with open(fp, "w") as ofile:
-        writer = csv.DictWriter(ofile, fieldnames=["student_id", "score"])
+        writer = csv.DictWriter(
+            ofile,
+            fieldnames=["student_id", "label_accuracy", "cluster_accuracy", "score"],
+        )
         writer.writeheader()
         for id in scores:
+            label_acc = scores[id]["label_accuracy"]
+            cluster_acc = scores[id]["cluster_accuracy"]
             score = scores[id]["score"]
-            writer.writerow({"student_id": id, "score": score})
+            writer.writerow(
+                {
+                    "student_id": id,
+                    "label_accuracy": label_acc,
+                    "cluster_accuracy": cluster_acc,
+                    "score": score,
+                }
+            )
 
 
 def write_transcripts(scores, tdir):
