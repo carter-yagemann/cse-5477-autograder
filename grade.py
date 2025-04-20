@@ -29,19 +29,28 @@ class Submission(object):
         self.hash2label = dict()
         self.hash2cluster = dict()
         self.cluster2hashes = dict()
+        self.namespaced = True
 
-    def add_sample(self, hash: str, label: str, cluster: str):
+    def add_sample(self, hash: str, label: str, cluster: str, namespace=None):
         assert label in "01"
 
         self.hash2label[hash] = label
 
         # only apply cluster if label is malicious: 1
         if label == "1":
-            self.hash2cluster[hash] = cluster
+            # cluster names are namespaced to avoid collisions while remapping
+            if namespace is None:
+                c_name = cluster
+                # this submission is no longer safe for remapping because there could be collisions!
+                self.namespaced = False
+            else:
+                c_name = "%s.%s" % (namespace, cluster)
 
-            if not cluster in self.cluster2hashes:
-                self.cluster2hashes[cluster] = set()
-            self.cluster2hashes[cluster].add(hash)
+            self.hash2cluster[hash] = c_name
+
+            if not c_name in self.cluster2hashes:
+                self.cluster2hashes[c_name] = set()
+            self.cluster2hashes[c_name].add(hash)
 
     def get_cluster(self, cluster: str):
         return self.cluster2hashes[cluster]
@@ -76,6 +85,8 @@ class Submission(object):
         return self.hash2label[hash] == "1"
 
     def convert_cluster(self, old_name: str, new_name: str):
+        assert self.namespaced
+
         for hash in self.hash2cluster:
             if not hash in self.hash2cluster:
                 continue
@@ -124,8 +135,8 @@ def remap_clusters(sub, gt):
     finding the minimum edit distance between sets.
 
     Keyword Arguments:
-    subs -- Student submission from parse_submission()
-    gt -- Ground truth CSV parsed with parse_submission()
+    subs -- Student submission from parse_submission
+    gt -- Ground truth CSV parsed with parse_submission
 
     Returns: None, sub is directly modified.
     """
@@ -295,9 +306,8 @@ def trim_ext(val: str):
     return val
 
 
-def parse_submission(fp):
+def parse_submission(fp, namespace):
     """Parses a submission CSV and returns a populated Submission object.
-
 
     May throw exception if file does not exist or cannot be read.
     """
@@ -311,7 +321,7 @@ def parse_submission(fp):
                     trim_ext(s.lower().strip())
                     for s in [row["sha256sum"], row["malicious"], row["cluster"]]
                 ]
-                sub.add_sample(*cleaned)
+                sub.add_sample(*cleaned, namespace)
     except (KeyError, FileNotFoundError) as ex:
         log.error("Cannot parse: %s, %s" % (fp, str(ex)))
 
@@ -345,7 +355,7 @@ def parse_submissions(root):
             subs[student_id] = Submission()
         else:
             log.info("Parsing: %s" % csv_fp)
-            subs[student_id] = parse_submission(csv_fp)
+            subs[student_id] = parse_submission(csv_fp, student_id)
 
     return subs
 
@@ -411,7 +421,7 @@ def main():
         os.mkdir(args.transcripts_directory)
 
     log.info("Parsing ground truth CSV: %s" % args.ground_truth_csv)
-    gt = parse_submission(args.ground_truth_csv)
+    gt = parse_submission(args.ground_truth_csv, "gt")
 
     log.info("Parsing student submissions")
     subs = parse_submissions(args.submissions_directory)
