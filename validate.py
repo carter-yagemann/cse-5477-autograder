@@ -17,8 +17,9 @@
 
 import argparse
 import csv
-from grade import Submission, parse_submission
 import os
+
+from grade import Submission, parse_submission
 
 
 def parse_arguments():
