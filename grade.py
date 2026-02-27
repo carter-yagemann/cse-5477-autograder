@@ -306,7 +306,7 @@ def trim_ext(val: str):
     return val
 
 
-def parse_submission(fp, namespace):
+def parse_submission(fp, namespace=None):
     """Parses a submission CSV and returns a populated Submission object.
 
     May throw exception if file does not exist or cannot be read.

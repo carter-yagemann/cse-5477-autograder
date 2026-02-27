@@ -36,7 +36,7 @@ def parse_arguments():
 def main():
     args = parse_arguments()
     sub = parse_submission(args.submission_csv)
-    print("Parsed submission successfully, found %d samples!" % sub.num_samples())
+    print("Finished parsing submission, found %d samples!" % sub.num_samples())
 
 
 if __name__ == "__main__":
