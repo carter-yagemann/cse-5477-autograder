@@ -307,78 +307,125 @@ def trim_ext(val: str):
 
 
 def parse_submission(fp, namespace=None):
-    """Parses a submission CSV and returns a populated Submission object.
-
-    May throw exception if file does not exist or cannot be read.
+    """
+    Parses a submission CSV and returns a populated Submission object.
+    Supports both standard comma-separated and space-separated values.
     """
     sub = Submission()
 
     try:
-        with open(fp, "r") as ifile:
+        with open(fp, "r", encoding='utf-8-sig', errors='ignore') as ifile:
+            # Using DictReader to handle CSV headers automatically
             reader = csv.DictReader(ifile)
             for row in reader:
-                cleaned = [
-                    trim_ext(s.lower().strip())
-                    for s in [row["sha256sum"], row["malicious"], row["cluster"]]
-                ]
-                sub.add_sample(*cleaned, namespace)
-    except (KeyError, FileNotFoundError) as ex:
-        log.error("Cannot parse: %s, %s" % (fp, str(ex)))
+                try:
+                    # Try standard CSV retrieval
+                    raw_hash = row.get("sha256sum")
+                    raw_label = row.get("malicious")
+                    raw_cluster = row.get("cluster")
+
+                    # FALLBACK: If raw_label is None, the student likely used spaces instead of commas
+                    if raw_label is None:
+                        # DictReader puts the whole un-split line in the first key
+                        full_line = list(row.values())[0] if row.values() else ""
+                        parts = full_line.split()
+                        if len(parts) >= 3:
+                            raw_hash, raw_label, raw_cluster = parts[0], parts[1], parts[2]
+                        else:
+                            continue # Still can't parse, skip this row
+
+                    # Basic safety check
+                    if raw_hash is None or raw_label is None:
+                        continue
+
+                    # Clean data: strip whitespace and standardize casing
+                    clean_hash = raw_hash.strip().lower()
+                    clean_label = raw_label.strip()
+                    # Default cluster to '0' or 'unknown' if missing
+                    clean_cluster = (raw_cluster or "0").strip().lower()
+
+                    # Validate label format
+                    if clean_label not in ["0", "1"]:
+                        log.warning(f"Skipping invalid label '{clean_label}' in {fp}")
+                        continue
+
+                    # Standardize extensions and add to submission object
+                    cleaned = [
+                        trim_ext(clean_hash),
+                        clean_label,
+                        trim_ext(clean_cluster)
+                    ]
+                    sub.add_sample(*cleaned, namespace)
+
+                except Exception as row_err:
+                    log.error(f"Error processing row in {fp}: {row_err}")
+                    continue
+
+    except (KeyError, FileNotFoundError, csv.Error) as ex:
+        log.error("Critical error parsing file: %s, %s" % (fp, str(ex)))
 
     return sub
 
-
 def parse_submissions(root):
-    """Parses the submissions directory and returns a dictionary of Submissions.
-
-    Within the root directory, there should be one directory per student, and then within that
-    should be one file with a .csv extension.
-
-    Returns: Dictionary where key is student's ID (based on directory name) and value is a parsed
-    Submission.
+    """
+    Parses the submissions directory. 
+    Supports two structures:
+    1. root/student_id/file.csv
+    2. root/student_id_other_stuff.csv
     """
     subs = dict()
 
-    for student_id in os.listdir(root):
-        dp = os.path.join(root, student_id)
-        log.debug("Scanning submission directory: %s" % dp)
+    for item in os.listdir(root):
+        path = os.path.join(root, item)
+        
+        if os.path.isdir(path):
+            student_id = item 
+            log.debug("Scanning submission directory: %s" % path)
 
-        csv_fp = None
-        for item in os.listdir(dp):
-            if not item.lower().endswith(".csv"):
-                continue
-            csv_fp = os.path.join(dp, item)
-            break
+            csv_fp = None
+            for sub_item in os.listdir(path):
+                if not sub_item.lower().endswith(".csv"):
+                    continue
+                csv_fp = os.path.join(path, sub_item)
+                break
 
-        if csv_fp is None:
-            log.warning("Cannot find CSV for student: %s" % student_id)
-            subs[student_id] = Submission()
-        else:
-            log.info("Parsing: %s" % csv_fp)
-            subs[student_id] = parse_submission(csv_fp, student_id)
+            if csv_fp is None:
+                log.warning("Cannot find CSV for student directory: %s" % student_id)
+                subs[student_id] = Submission()
+            else:
+                log.info("Parsing (from dir): %s" % csv_fp)
+                subs[student_id] = parse_submission(csv_fp, student_id)
+
+        elif item.lower().endswith(".csv"):
+            student_id = item.split('_')[0]
+            log.info("Parsing (flat file): %s" % path)
+            subs[student_id] = parse_submission(path, student_id)
 
     return subs
 
 
 def write_scores(scores, fp):
+    """
+    Writes the final scores to a CSV, sorted alphabetically by student_id.
+    The format is ready for a quick copy-paste to students.
+    """
     with open(fp, "w") as ofile:
-        writer = csv.DictWriter(
-            ofile,
-            fieldnames=["student_id", "label_accuracy", "cluster_accuracy", "score"],
-        )
-        writer.writeheader()
-        for id in scores:
-            label_acc = scores[id]["label_accuracy"]
-            cluster_acc = scores[id]["cluster_accuracy"]
-            score = scores[id]["score"]
-            writer.writerow(
-                {
-                    "student_id": id,
-                    "label_accuracy": label_acc,
-                    "cluster_accuracy": cluster_acc,
-                    "score": score,
-                }
+        writer = csv.writer(ofile)
+        
+        writer.writerow(["Student ID", "Grade Summary (Ready to Copy)"])
+        
+        for id in sorted(scores.keys()):
+            label_acc = scores[id]["label_accuracy"] * 100
+            cluster_acc = scores[id]["cluster_accuracy"] * 100
+            avg_score = scores[id]["score"] * 100
+            
+            summary = (
+                f"Binary Classification: {label_acc:.2f}%\n"
+                f"Clustering Accuracy: {cluster_acc:.2f}%\n"
+                f"Average: {avg_score:.2f}%"
             )
+            
+            writer.writerow([id, summary])
 
 
 def write_transcripts(scores, tdir):
